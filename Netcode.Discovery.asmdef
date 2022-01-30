@@ -1,0 +1,17 @@
+{
+    "name": "Netcode.Discovery",
+    "rootNamespace": "Optifun.Discovery",
+    "references": [
+        "GUID:3bf5041814073ec4089849c425919d5a",
+        "GUID:1491147abca9d7d4bb7105af628b223e"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

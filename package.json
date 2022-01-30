@@ -1,0 +1,12 @@
+{
+  "name": "com.github.optifun.netcode.broadcast",
+  "displayName": "Netcode discovery package",
+  "version": "1.0.0",
+  "unity": "2019.4",
+  "description": "",
+  "author": "Optifun",
+  "dependencies": {
+    "com.unity.netcode.gameobjects": "1.0.0-pre.4",
+    "com.unity.netcode.adapter.utp" : "1.0.0-pre.4"
+  }
+}
