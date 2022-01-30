@@ -1,7 +1,7 @@
 using System;
 using System.Net;
 
-namespace Server
+namespace Optifun.Discovery
 {
     [Serializable]
     public class BroadcastData
