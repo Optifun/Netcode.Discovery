@@ -3,10 +3,8 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
-using JetBrains.Annotations;
 using Unity.Collections;
 using Unity.Netcode;
-using UnityEditor;
 using UnityEngine;
 using Random = UnityEngine.Random;
 
@@ -116,16 +114,17 @@ namespace Optifun.Discovery
 
             _tokenSource = new CancellationTokenSource();
             _sync = SynchronizationContext.Current;
+            _discoveryData = new TBroadCast();
 
             _client = new UdpClient(server ? m_Port : 0) {EnableBroadcast = true, MulticastLoopback = false};
             if (IsClient)
             {
-                Task.Factory.StartNew(() => SendBroadcast(_tokenSource.Token), _tokenSource.Token);
-                Task.Factory.StartNew(() => ReceiveBroadcastResponse(_tokenSource.Token), _tokenSource.Token);
+                _ = Task.Factory.StartNew(async () => await SendBroadcast(_tokenSource.Token), _tokenSource.Token, TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.FromCurrentSynchronizationContext());
+                _ = Task.Factory.StartNew(async () => await ReceiveBroadcastResponse(_tokenSource.Token), _tokenSource.Token, TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.FromCurrentSynchronizationContext());
             }
             else
             {
-                Task.Factory.StartNew(() => ReceiveBroadcastRequests(_tokenSource.Token), _tokenSource.Token);
+                _ = Task.Factory.StartNew(async () => await ReceiveBroadcastRequests(_tokenSource.Token), _tokenSource.Token, TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.FromCurrentSynchronizationContext());
             }
         }
 
@@ -137,14 +136,14 @@ namespace Optifun.Discovery
         /// Client:
         /// </summary>
         /// <param name="token"></param>
-        private void SendBroadcast(CancellationToken token)
+        private async Task SendBroadcast(CancellationToken token)
         {
-            byte[] broadCastMessage = SerializeData(_discoveryData);
+            byte[] broadCastMessage = SerializeData(_discoveryData, MessageType.BroadCast);
             IPEndPoint broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, m_Port);
             while (!token.IsCancellationRequested)
             {
-                _client.Send(broadCastMessage, broadCastMessage.Length, broadcastEndPoint);
-                Thread.Sleep(BroadcastInterval);
+                await _client.SendAsync(broadCastMessage, broadCastMessage.Length, broadcastEndPoint);
+                await Task.Delay(BroadcastInterval, token);
             }
         }
 
@@ -152,18 +151,26 @@ namespace Optifun.Discovery
         /// Client:
         /// </summary>
         /// <param name="token"></param>
-        private void ReceiveBroadcastResponse(CancellationToken token)
+        private async Task ReceiveBroadcastResponse(CancellationToken token)
         {
-            var endPoint = new IPEndPoint(IPAddress.Any, 0);
             while (!token.IsCancellationRequested)
             {
-                byte[] serverResponse = _client.Receive(ref endPoint);
-                var segment = new ArraySegment<byte>(serverResponse, 0, serverResponse.Length);
+                var serverResponse = await _client.ReceiveAsync();
+                var segment = new ArraySegment<byte>(serverResponse.Buffer, 0, serverResponse.Buffer.Length);
 
-                using (var reader = new FastBufferReader(segment, Allocator.Temp))
+                using var reader = new FastBufferReader(segment, Allocator.Temp);
+
+                try
                 {
-                    if (ValidateResponse(reader, out TResponse data))
-                        ResponseReceived(endPoint, data);
+                    if (ReadAndCheckHeader(reader, MessageType.Response) == false)
+                        return;
+
+                    reader.ReadNetworkSerializable(out TResponse receivedResponse);
+                    ResponseReceived(serverResponse.RemoteEndPoint, receivedResponse);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogException(e);
                 }
             }
         }
@@ -175,14 +182,13 @@ namespace Optifun.Discovery
         /// <param name="token"></param>
         private async Task ReceiveBroadcastRequests(CancellationToken token)
         {
-            var endPoint = new IPEndPoint(IPAddress.Any, 0);
             while (!token.IsCancellationRequested)
             {
-                byte[] requestData = _client.Receive(ref endPoint);
-                var segment = new ArraySegment<byte>(requestData, 0, requestData.Length);
+                var request = await _client.ReceiveAsync();
+                var segment = new ArraySegment<byte>(request.Buffer, 0, request.Buffer.Length);
                 using (var reader = new FastBufferReader(segment, Allocator.Temp))
                 {
-                    await ReplyClient(endPoint, reader);
+                    await ReplyClient(request.RemoteEndPoint, reader);
                 }
             }
         }
@@ -203,7 +209,7 @@ namespace Optifun.Discovery
 
                 if (ProcessBroadcast(endPoint, receivedBroadcast, out TResponse response))
                 {
-                    byte[] data = SerializeData(response);
+                    byte[] data = SerializeData(response, MessageType.Response);
                     await _client.SendAsync(data, data.Length, endPoint);
                 }
             }
@@ -222,36 +228,31 @@ namespace Optifun.Discovery
         /// <returns></returns>
         private bool ValidateResponse(FastBufferReader reader, out TResponse response)
         {
-            try
-            {
-                if (ReadAndCheckHeader(reader, MessageType.Response) == false)
-                {
-                    response = default;
-                    return false;
-                }
-
-                reader.ReadNetworkSerializable(out TResponse receivedResponse);
-                response = receivedResponse;
-                return true;
-            }
-            catch (Exception e)
-            {
-                Debug.LogException(e);
-            }
-
             response = default;
             return false;
         }
 
-        private byte[] SerializeData<TValue>(TValue discoveryData) where TValue : INetworkSerializable, new()
+        private byte[] SerializeData<TValue>(TValue discoveryData, MessageType messageType) where TValue : INetworkSerializable, new()
         {
-            using (FastBufferWriter writer = new FastBufferWriter(1024, Allocator.Temp, 1024 * 64))
-            {
-                WriteHeader(writer, MessageType.BroadCast);
+            FastBufferWriter writer = new FastBufferWriter(1024, Allocator.Temp, 1024 * 64);
 
+            byte[] bytes = Array.Empty<byte>();
+            try
+            {
+                WriteHeader(writer, messageType);
                 writer.WriteNetworkSerializable(discoveryData);
-                return writer.ToArray();
+                bytes = writer.ToArray();
             }
+            catch (Exception e)
+            {
+                Debug.LogError(e);
+            }
+            finally
+            {
+                writer.Dispose();
+            }
+
+            return bytes;
         }
 
 
