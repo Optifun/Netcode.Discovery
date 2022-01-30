@@ -23,17 +23,12 @@ namespace Optifun.Discovery
         public bool IsServer { get; private set; }
         public bool IsClient { get; private set; }
 
-        public int BroadcastInterval
-        {
-            get => _broadcastInterval;
-            set => _broadcastInterval = value;
-        }
+        public int BroadcastInterval => _broadcastInterval;
 
         [SerializeField] private ushort m_Port = 47776;
         [SerializeField] private long m_UniqueApplicationId;
-        [SerializeField] private int _broadcastInterval;
+        [SerializeField] private int _broadcastInterval = 2600;
 
-        private SynchronizationContext _sync;
         private CancellationTokenSource _tokenSource;
         private UdpClient _client;
         private TBroadCast _discoveryData;
@@ -53,34 +48,8 @@ namespace Optifun.Discovery
             }
         }
 
-        // public void ClientBroadcast(TBroadCast request)
-        // {
-        //     if (!IsClient)
-        //     {
-        //         throw new InvalidOperationException("Cannot send client broadcast while not running in client mode. Call StartClient first.");
-        //     }
-        //
-        //
-        //     _discoveryData = request;
-        //     
-        //     IPEndPoint endPoint = new IPEndPoint(IPAddress.Broadcast, m_Port);
-        //
-        //     var data = SerializeData(_discoveryData);
-        //
-        //     try
-        //     {
-        //         _client.SendAsync(data, data.Length, endPoint);
-        //     }
-        //     catch (Exception e)
-        //     {
-        //         Debug.LogError(e);
-        //     }
-        // }
-
-        public void SetRequestContent(TBroadCast request)
-        {
+        public void SetRequestContent(TBroadCast request) =>
             _discoveryData = request;
-        }
 
         public void StartServer() =>
             StartDiscovery(true);
@@ -111,22 +80,28 @@ namespace Optifun.Discovery
             StopDiscovery();
             IsServer = server;
             IsClient = !server;
-
+            
             _tokenSource = new CancellationTokenSource();
-            _sync = SynchronizationContext.Current;
             _discoveryData = new TBroadCast();
+            _broadcastInterval = Math.Max(_broadcastInterval, 200);
 
             _client = new UdpClient(server ? m_Port : 0) {EnableBroadcast = true, MulticastLoopback = false};
             if (IsClient)
             {
-                _ = Task.Factory.StartNew(async () => await SendBroadcast(_tokenSource.Token), _tokenSource.Token, TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.FromCurrentSynchronizationContext());
-                _ = Task.Factory.StartNew(async () => await ReceiveBroadcastResponse(_tokenSource.Token), _tokenSource.Token, TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.FromCurrentSynchronizationContext());
+                _ = StartTask(async () => await SendBroadcast(_tokenSource.Token));
+                _ = StartTask(async () => await ReceiveBroadcastResponse(_tokenSource.Token));
             }
             else
             {
-                _ = Task.Factory.StartNew(async () => await ReceiveBroadcastRequests(_tokenSource.Token), _tokenSource.Token, TaskCreationOptions.RunContinuationsAsynchronously, TaskScheduler.FromCurrentSynchronizationContext());
+                _ = StartTask(async () => await ReceiveBroadcastRequests(_tokenSource.Token));
             }
         }
+
+        private Task StartTask(Func<Task> callback) =>
+            Task.Factory.StartNew(callback,
+                _tokenSource.Token,
+                TaskCreationOptions.RunContinuationsAsynchronously,
+                TaskScheduler.FromCurrentSynchronizationContext());
 
         protected abstract bool ProcessBroadcast(IPEndPoint sender, TBroadCast broadCast, out TResponse response);
         protected abstract void ResponseReceived(IPEndPoint sender, TResponse response);
@@ -218,20 +193,7 @@ namespace Optifun.Discovery
                 Debug.LogException(e);
             }
         }
-
-
-        /// <summary>
-        /// Client: read and validate server response 
-        /// </summary>
-        /// <param name="reader"></param>
-        /// <param name="response"></param>
-        /// <returns></returns>
-        private bool ValidateResponse(FastBufferReader reader, out TResponse response)
-        {
-            response = default;
-            return false;
-        }
-
+        
         private byte[] SerializeData<TValue>(TValue discoveryData, MessageType messageType) where TValue : INetworkSerializable, new()
         {
             FastBufferWriter writer = new FastBufferWriter(1024, Allocator.Temp, 1024 * 64);
@@ -254,12 +216,10 @@ namespace Optifun.Discovery
 
             return bytes;
         }
-
-
+        
         private void WriteHeader(FastBufferWriter writer, MessageType messageType)
         {
             writer.WriteValueSafe(m_UniqueApplicationId);
-
             writer.WriteByteSafe((byte) messageType);
         }
 
@@ -267,15 +227,11 @@ namespace Optifun.Discovery
         {
             reader.ReadValueSafe(out long receivedApplicationId);
             if (receivedApplicationId != m_UniqueApplicationId)
-            {
                 return false;
-            }
 
             reader.ReadByteSafe(out byte messageType);
             if (messageType != (byte) expectedType)
-            {
                 return false;
-            }
 
             return true;
         }
