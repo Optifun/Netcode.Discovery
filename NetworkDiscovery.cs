@@ -48,8 +48,12 @@ namespace Optifun.Discovery
             }
         }
 
-        public void SetRequestContent(TBroadCast request) =>
-            _discoveryData = request;
+        public void ClientBroadcast(TBroadCast request)
+        {
+            byte[] broadCastMessage = SerializeData(request, MessageType.BroadCast);
+            IPEndPoint broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, m_Port);
+            _client.Send(broadCastMessage, broadCastMessage.Length, broadcastEndPoint);
+        }
 
         public void StartServer() =>
             StartDiscovery(true);
@@ -80,21 +84,16 @@ namespace Optifun.Discovery
             StopDiscovery();
             IsServer = server;
             IsClient = !server;
-            
+
             _tokenSource = new CancellationTokenSource();
             _discoveryData = new TBroadCast();
             _broadcastInterval = Math.Max(_broadcastInterval, 200);
 
             _client = new UdpClient(server ? m_Port : 0) {EnableBroadcast = true, MulticastLoopback = false};
             if (IsClient)
-            {
-                _ = StartTask(async () => await SendBroadcast(_tokenSource.Token));
                 _ = StartTask(async () => await ReceiveBroadcastResponse(_tokenSource.Token));
-            }
             else
-            {
                 _ = StartTask(async () => await ReceiveBroadcastRequests(_tokenSource.Token));
-            }
         }
 
         private Task StartTask(Func<Task> callback) =>
@@ -105,22 +104,6 @@ namespace Optifun.Discovery
 
         protected abstract bool ProcessBroadcast(IPEndPoint sender, TBroadCast broadCast, out TResponse response);
         protected abstract void ResponseReceived(IPEndPoint sender, TResponse response);
-
-
-        /// <summary>
-        /// Client:
-        /// </summary>
-        /// <param name="token"></param>
-        private async Task SendBroadcast(CancellationToken token)
-        {
-            byte[] broadCastMessage = SerializeData(_discoveryData, MessageType.BroadCast);
-            IPEndPoint broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, m_Port);
-            while (!token.IsCancellationRequested)
-            {
-                await _client.SendAsync(broadCastMessage, broadCastMessage.Length, broadcastEndPoint);
-                await Task.Delay(BroadcastInterval, token);
-            }
-        }
 
         /// <summary>
         /// Client:
@@ -161,10 +144,8 @@ namespace Optifun.Discovery
             {
                 var request = await _client.ReceiveAsync();
                 var segment = new ArraySegment<byte>(request.Buffer, 0, request.Buffer.Length);
-                using (var reader = new FastBufferReader(segment, Allocator.Temp))
-                {
-                    await ReplyClient(request.RemoteEndPoint, reader);
-                }
+                using var reader = new FastBufferReader(segment, Allocator.Temp);
+                await ReplyClient(request.RemoteEndPoint, reader);
             }
         }
 
@@ -193,7 +174,7 @@ namespace Optifun.Discovery
                 Debug.LogException(e);
             }
         }
-        
+
         private byte[] SerializeData<TValue>(TValue discoveryData, MessageType messageType) where TValue : INetworkSerializable, new()
         {
             FastBufferWriter writer = new FastBufferWriter(1024, Allocator.Temp, 1024 * 64);
@@ -216,7 +197,7 @@ namespace Optifun.Discovery
 
             return bytes;
         }
-        
+
         private void WriteHeader(FastBufferWriter writer, MessageType messageType)
         {
             writer.WriteValueSafe(m_UniqueApplicationId);

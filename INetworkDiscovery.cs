@@ -17,7 +17,7 @@ public interface INetworkDiscovery<TRequest> where TRequest: INetworkSerializabl
     /// </summary>
     bool IsClient { get; }
 
-    void SetRequestContent(TRequest request);
+    void ClientBroadcast(TRequest request);
 
     /// <summary>
     /// Starts the discovery in server mode which will respond to client broadcasts searching for servers.
