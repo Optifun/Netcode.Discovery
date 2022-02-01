@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,15 +24,15 @@ namespace Optifun.Discovery
         public bool IsServer { get; private set; }
         public bool IsClient { get; private set; }
 
-        public int BroadcastInterval => _broadcastInterval;
 
         [SerializeField] private ushort m_Port = 47776;
         [SerializeField] private long m_UniqueApplicationId;
-        [SerializeField] private int _broadcastInterval = 2600;
 
         private CancellationTokenSource _tokenSource;
         private UdpClient _client;
         private TBroadCast _discoveryData;
+        private IPAddress _broadcastIP;
+        private IPv6MulticastOption _multicastGroup;
 
         private void OnApplicationQuit()
         {
@@ -51,7 +52,8 @@ namespace Optifun.Discovery
         public void ClientBroadcast(TBroadCast request)
         {
             byte[] broadCastMessage = SerializeData(request, MessageType.BroadCast);
-            IPEndPoint broadcastEndPoint = new IPEndPoint(IPAddress.Broadcast, m_Port);
+            // IPEndPoint broadcastEndPoint = new IPEndPoint(IPAddress.Parse("ff02::1"), m_Port);
+            IPEndPoint broadcastEndPoint = new IPEndPoint(_broadcastIP, m_Port);
             _client.Send(broadCastMessage, broadCastMessage.Length, broadcastEndPoint);
         }
 
@@ -70,6 +72,7 @@ namespace Optifun.Discovery
             try
             {
                 _tokenSource?.Cancel();
+                _client?.DropMulticastGroup(_multicastGroup.Group, (int) _multicastGroup.InterfaceIndex);
                 _client?.Close();
             }
             catch (Exception e)
@@ -87,13 +90,22 @@ namespace Optifun.Discovery
 
             _tokenSource = new CancellationTokenSource();
             _discoveryData = new TBroadCast();
-            _broadcastInterval = Math.Max(_broadcastInterval, 200);
 
-            _client = new UdpClient(server ? m_Port : 0) {EnableBroadcast = true, MulticastLoopback = false};
+            _client = new UdpClient(server ? m_Port : 0, AddressFamily.InterNetworkV6);
+            // _broadcastIP = GetBroadcastIP();
+            _broadcastIP = IPAddress.Parse("ff02::1");
+            _multicastGroup = new IPv6MulticastOption(_broadcastIP);
+
             if (IsClient)
+            {
+                _client.JoinMulticastGroup(_broadcastIP);
                 _ = StartTask(async () => await ReceiveBroadcastResponse(_tokenSource.Token));
+            }
             else
+            {
+                _client.JoinMulticastGroup((int) _multicastGroup.InterfaceIndex, _multicastGroup.Group);
                 _ = StartTask(async () => await ReceiveBroadcastRequests(_tokenSource.Token));
+            }
         }
 
         private Task StartTask(Func<Task> callback) =>
@@ -215,6 +227,32 @@ namespace Optifun.Discovery
                 return false;
 
             return true;
+        }
+
+        public IPAddress GetBroadcastIP()
+        {
+            foreach (NetworkInterface item in NetworkInterface.GetAllNetworkInterfaces())
+            {
+#if UNITY_EDITOR_WIN || UNITY_STANDALONE_WIN
+                NetworkInterfaceType _type1 = NetworkInterfaceType.Wireless80211;
+                NetworkInterfaceType _type2 = NetworkInterfaceType.Ethernet;
+
+                if ((item.NetworkInterfaceType == _type1 || item.NetworkInterfaceType == _type2) &&
+                    item.OperationalStatus == OperationalStatus.Up && item.SupportsMulticast)
+#endif
+                {
+                    foreach (var ip in item.GetIPProperties().MulticastAddresses)
+                    {
+                        Debug.Log($"{item.Name} - {item.Description} = {ip.Address}");
+                        if (ip.Address.AddressFamily == AddressFamily.InterNetworkV6)
+                        {
+                            return ip.Address;
+                        }
+                    }
+                }
+            }
+
+            return IPAddress.IPv6Any;
         }
     }
 }
