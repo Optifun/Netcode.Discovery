@@ -14,8 +14,8 @@
     "url": "https://github.com/Optifun"
   },
   "dependencies": {
-    "com.unity.netcode.gameobjects": "1.0.0-pre.4",
-    "com.unity.netcode.adapter.utp" : "1.0.0-pre.4"
+    "com.unity.netcode.gameobjects": "1.0.0-pre.3",
+    "com.unity.netcode.adapter.utp" : "1.0.0-pre.3"
   }
 
 }
