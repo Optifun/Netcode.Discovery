@@ -1,7 +1,7 @@
 {
   "name": "com.github.optifun.unity.discovery",
   "displayName": "Netcode discovery package",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "unity": "2019.4",
   "description": "",
   "keywords": [
@@ -14,8 +14,7 @@
     "url": "https://github.com/Optifun"
   },
   "dependencies": {
-    "com.unity.netcode.gameobjects": "1.0.0-pre.3",
-    "com.unity.netcode.adapter.utp" : "1.0.0-pre.3"
+    "com.unity.netcode.gameobjects": "1.0.0-pre.9"
   }
 
 }
